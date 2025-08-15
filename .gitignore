@@ -1,0 +1,13 @@
+.idea
+.cursor
+.vscode
+.code
+
+bin/
+data/
+data-replica/
+test-server-data/
+
+*.log
+*.out
+*.json
