@@ -1,0 +1,36 @@
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/"               # location of go.mod
+    schedule:
+      interval: "weekly"        # can be "daily", "weekly" or "monthly"
+      day: "sunday"             # only relevant for weekly/monthly
+      time: "03:00"             # UTC time the check runs
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "docker"
+    directory: "/"               # path that contains the Dockerfile(s)
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "04:00"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "github-actions"
+    directory: "/"               # root of the repo (where .github/workflows lives)
+    schedule:
+      interval: "daily"
+      time: "02:00"
+    open-pull-requests-limit: 5
+
+# -----------------------------------------------------------------
+# Global settings (optional)
+# -----------------------------------------------------------------
+# security-updates only (true/false). When true, Dependabot will open a PR
+# for any known security vulnerability regardless of schedule.
+security-updates: true
+
+rebase-strategy: "auto"   # options: "auto", "disabled"
+
+# If you have a private registry for Docker images you can add credentials
+# under `registries:` (see Dependabot docs for the exact syntax).
