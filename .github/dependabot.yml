@@ -22,15 +22,3 @@ updates:
       interval: "daily"
       time: "02:00"
     open-pull-requests-limit: 5
-
-# -----------------------------------------------------------------
-# Global settings (optional)
-# -----------------------------------------------------------------
-# security-updates only (true/false). When true, Dependabot will open a PR
-# for any known security vulnerability regardless of schedule.
-security-updates: true
-
-rebase-strategy: "auto"   # options: "auto", "disabled"
-
-# If you have a private registry for Docker images you can add credentials
-# under `registries:` (see Dependabot docs for the exact syntax).
