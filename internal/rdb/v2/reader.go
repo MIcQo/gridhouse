@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hdt3213/rdb/parser"
+	"github.com/sirupsen/logrus"
 )
 
 type Reader struct {
@@ -72,13 +73,21 @@ func (r *Reader) ReadAll(db store.DataStore) error {
 		case parser.StreamType:
 			// Convert parser.StreamObject into our store.Stream
 			so := o.(*parser.StreamObject)
-			st := db.GetOrCreateStream(getStreamKey(so))
+			key := o.GetKey()
+			if key == "" {
+				key = getStreamKey(so)
+			}
+			st := db.GetOrCreateStream(key)
 			// Extract and append entries in order
 			forEachStreamEntry(so, func(id store.StreamID, fields map[string]string) {
 				// Ignore error here; if IDs are not strictly increasing, XAdd will error.
 				// Since RDB guarantees order, this should succeed.
-				_, _ = st.XAdd(&id, fields)
+				var _, err = st.XAdd(&id, fields)
+				if err != nil {
+					logrus.Error(err)
+				}
 			})
+			println("stream", so.Key, so.Entries)
 		}
 		// return true to continue, return false to stop the iteration
 		return true
@@ -91,14 +100,35 @@ func (r *Reader) Close() error {
 
 // getStreamKey attempts to read the Key field from parser.StreamObject via reflection
 func getStreamKey(so *parser.StreamObject) string {
+	// Prefer using GetKey method if available via embedding
+	if kProvider, ok := any(so).(interface{ GetKey() string }); ok {
+		if key := kProvider.GetKey(); key != "" {
+			return key
+		}
+	}
+	// Fallback to reflection: try BaseObject.Key
 	v := reflect.ValueOf(so)
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
 	}
 	if v.IsValid() && v.Kind() == reflect.Struct {
+		// Direct Key (if present)
 		f := v.FieldByName("Key")
 		if f.IsValid() && f.Kind() == reflect.String {
 			return f.String()
+		}
+		// Embedded BaseObject.Key
+		bo := v.FieldByName("BaseObject")
+		if bo.IsValid() {
+			if bo.Kind() == reflect.Ptr {
+				bo = bo.Elem()
+			}
+			if bo.IsValid() && bo.Kind() == reflect.Struct {
+				kf := bo.FieldByName("Key")
+				if kf.IsValid() && kf.Kind() == reflect.String {
+					return kf.String()
+				}
+			}
 		}
 	}
 	return ""
@@ -119,20 +149,43 @@ func forEachStreamEntry(so *parser.StreamObject, cb func(id store.StreamID, fiel
 	}
 	for i := 0; i < entries.Len(); i++ {
 		ev := entries.Index(i)
-		// Handle pointer to struct entry as well
 		if ev.Kind() == reflect.Ptr {
 			ev = ev.Elem()
 		}
 		if !ev.IsValid() || ev.Kind() != reflect.Struct {
 			continue
 		}
-		id := extractStreamID(ev.FieldByName("ID"))
-		fields := extractFieldsMap(ev.FieldByName("Fields"))
-		cb(id, fields)
+		// Each entry contains a slice of messages under field "Msgs"
+		msgs := ev.FieldByName("Msgs")
+		if !msgs.IsValid() || msgs.Kind() != reflect.Slice {
+			continue
+		}
+		for j := 0; j < msgs.Len(); j++ {
+			mv := msgs.Index(j)
+			if mv.Kind() == reflect.Ptr {
+				mv = mv.Elem()
+			}
+			if !mv.IsValid() || mv.Kind() != reflect.Struct {
+				continue
+			}
+			id := extractStreamID(mv.FieldByName("Id"))
+			fields := extractFieldsMap(mv.FieldByName("Fields"))
+			cb(id, fields)
+		}
 	}
 }
 
 func extractStreamID(idV reflect.Value) store.StreamID {
+	if !idV.IsValid() {
+		return store.StreamID{Ms: 0, Seq: 0}
+	}
+	// Dereference pointers
+	if idV.Kind() == reflect.Ptr {
+		if idV.IsNil() {
+			return store.StreamID{Ms: 0, Seq: 0}
+		}
+		idV = idV.Elem()
+	}
 	if idV.IsValid() && idV.Kind() == reflect.Struct {
 		ms := extractUintField(idV, []string{"Ms", "MsTime", "Time"})
 		seq := extractUintField(idV, []string{"Seq", "Sequence"})

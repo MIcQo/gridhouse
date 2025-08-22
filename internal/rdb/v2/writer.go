@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gridhouse/internal/store"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/hdt3213/rdb/core"
@@ -70,8 +71,75 @@ func (w *Writer) WriteZSet(key string, pairs map[string]float64, _ time.Time) er
 	return w.enc.WriteZSetObject(key, zset)
 }
 
-func (w *Writer) WriteStream(_ string, _ []store.StreamEntry, _ time.Time) error {
-	return nil
+func (w *Writer) WriteStream(key string, entries []store.StreamEntry, exp time.Time) error {
+	// Build model.StreamObject from store entries
+	stream := &model.StreamObject{
+		Version: 2,
+		Entries: make([]*model.StreamEntry, 0, len(entries)),
+		Groups:  nil,
+	}
+	// Helper to track first/last IDs
+	var (
+		minMs  uint64
+		minSeq uint64
+		maxMs  uint64
+		maxSeq uint64
+	)
+	if len(entries) > 0 {
+		minMs, minSeq = entries[0].ID.Ms, entries[0].ID.Seq
+		maxMs, maxSeq = minMs, minSeq
+	}
+	for _, e := range entries {
+		// Determine deterministic field order (sorted by field name)
+		fieldNames := make([]string, 0, len(e.Fields))
+		for k := range e.Fields {
+			fieldNames = append(fieldNames, k)
+		}
+		// Sort to get stable encoding
+		sort.Strings(fieldNames)
+
+		// Build message map according to the same field order
+		msgFields := make(map[string]string, len(e.Fields))
+		for _, k := range fieldNames {
+			msgFields[k] = e.Fields[k]
+		}
+
+		id := &model.StreamId{Ms: e.ID.Ms, Sequence: e.ID.Seq}
+		me := &model.StreamEntry{
+			FirstMsgId: id,
+			Fields:     fieldNames,
+			Msgs: []*model.StreamMessage{
+				{Id: id, Fields: msgFields, Deleted: false},
+			},
+		}
+		stream.Entries = append(stream.Entries, me)
+
+		// Track min/max IDs
+		if e.ID.Ms < minMs || (e.ID.Ms == minMs && e.ID.Seq < minSeq) {
+			minMs, minSeq = e.ID.Ms, e.ID.Seq
+		}
+		if e.ID.Ms > maxMs || (e.ID.Ms == maxMs && e.ID.Seq > maxSeq) {
+			maxMs, maxSeq = e.ID.Ms, e.ID.Seq
+		}
+	}
+	// Populate metadata
+	stream.Length = uint64(len(entries))
+	if len(entries) > 0 {
+		stream.FirstId = &model.StreamId{Ms: minMs, Sequence: minSeq}
+		stream.LastId = &model.StreamId{Ms: maxMs, Sequence: maxSeq}
+		stream.AddedEntriesCount = uint64(len(entries))
+	} else {
+		stream.FirstId = &model.StreamId{Ms: 0, Sequence: 0}
+		stream.LastId = &model.StreamId{Ms: 0, Sequence: 0}
+		stream.AddedEntriesCount = 0
+	}
+
+	// Pass TTL option if expiration is set
+	var opts []interface{}
+	if !exp.IsZero() {
+		opts = append(opts, encoder.WithTTL(uint64(exp.Unix()*1000)))
+	}
+	return w.enc.WriteStreamObject(key, stream, opts...)
 }
 
 func NewWriter(path string) (*Writer, error) {

@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ import (
 func TestRDBV2RoundTripBasic(t *testing.T) {
 	// Prepare a temporary directory and file path for RDB
 	dir := t.TempDir()
-	rdbPath := filepath.Join(dir, "dump.rdb")
+	rdbPath := filepath.Join(dir, "test.rdb")
 
 	// Populate source DB with different types
 	src := store.NewUltraOptimizedDB()
@@ -41,6 +42,11 @@ func TestRDBV2RoundTripBasic(t *testing.T) {
 	// ZSet
 	z := src.GetOrCreateSortedSet("zset:rank")
 	z.ZAdd(map[string]float64{"bob": 1.5, "carol": 3.2, "alice": 2.7})
+
+	// Stream
+	st := src.GetOrCreateStream("stream:orders")
+	_, _ = st.XAdd(&store.StreamID{Ms: 1000, Seq: 1}, map[string]string{"type": "buy", "amount": "10"})
+	_, _ = st.XAdd(&store.StreamID{Ms: 1001, Seq: 2}, map[string]string{"type": "sell", "amount": "5"})
 
 	// Write RDB using v2 writer
 	w, err := NewWriter(rdbPath)
@@ -71,13 +77,13 @@ func TestRDBV2RoundTripBasic(t *testing.T) {
 			require.NoError(t, w.WriteString(k, v, expiration))
 		case store.TypeList:
 			vals := src.GetOrCreateList(k).LRange(0, -1)
-			require.NoError(t, w.WriteList(k, vals, time.Time{}))
+			require.NoError(t, w.WriteList(k, vals, expiration))
 		case store.TypeSet:
 			members := src.GetOrCreateSet(k).SMembers()
-			require.NoError(t, w.WriteSet(k, members, time.Time{}))
+			require.NoError(t, w.WriteSet(k, members, expiration))
 		case store.TypeHash:
 			fields := src.GetOrCreateHash(k).HGetAll()
-			require.NoError(t, w.WriteHash(k, fields, time.Time{}))
+			require.NoError(t, w.WriteHash(k, fields, expiration))
 		case store.TypeSortedSet:
 			// Build map from ZSet ordered view
 			pairs := map[string]float64{}
@@ -93,10 +99,15 @@ func TestRDBV2RoundTripBasic(t *testing.T) {
 					pairs[m] = s
 				}
 			}
-			require.NoError(t, w.WriteZSet(k, pairs, time.Time{}))
+			require.NoError(t, w.WriteZSet(k, pairs, expiration))
 		case store.TypeStream:
-			// Writer's WriteStream is a no-op; skip stream keys in this basic round-trip
-			continue
+			entries := src.GetOrCreateStream(k).XRange(store.StreamID{Ms: 0, Seq: 0}, store.StreamID{Ms: ^uint64(0), Seq: ^uint64(0)}, 0)
+			wEntries := make([]store.StreamEntry, len(entries))
+			for i, e := range entries {
+				wEntries[i] = store.StreamEntry{ID: e.ID, Fields: e.Fields}
+				fmt.Println(wEntries)
+			}
+			require.NoError(t, w.WriteStream(k, wEntries, expiration))
 		}
 	}
 	require.NoError(t, w.WriteEOF())
@@ -139,5 +150,22 @@ func TestRDBV2RoundTripBasic(t *testing.T) {
 	}
 	if s, ok := z2.ZScore("alice"); assert.True(t, ok) {
 		assert.InDelta(t, 2.7, s, 1e-9)
+	}
+
+	entries := dst.GetOrCreateStream("stream:orders").
+		XRange(store.StreamID{Ms: 0, Seq: 0}, store.StreamID{Ms: ^uint64(0), Seq: ^uint64(0)}, 0)
+	assert.NotEmpty(t, entries)
+
+	// Verify IDs and fields preserved
+	if assert.Equal(t, len(entries), 2) {
+		assert.Equal(t, uint64(1000), entries[0].ID.Ms)
+		assert.Equal(t, uint64(1), entries[0].ID.Seq)
+		assert.Equal(t, "buy", entries[0].Fields["type"])
+		assert.Equal(t, "10", entries[0].Fields["amount"])
+
+		assert.Equal(t, uint64(1001), entries[1].ID.Ms)
+		assert.Equal(t, uint64(2), entries[1].ID.Seq)
+		assert.Equal(t, "sell", entries[1].Fields["type"])
+		assert.Equal(t, "5", entries[1].Fields["amount"])
 	}
 }

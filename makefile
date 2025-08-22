@@ -18,6 +18,8 @@ LDFLAGS += \
 -X 'gridhouse/internal/stats.Commit=${GIT_HASH}' \
 -X 'gridhouse/internal/stats.BuildDate=${BUILD_DATE}'
 
+.SILENT:
+
 check-quality: ## runs code quality checks
 	make lint
 	make fmt
