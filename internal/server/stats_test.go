@@ -8,7 +8,7 @@ import (
 )
 
 func TestServerStats(t *testing.T) {
-	stats := NewServerStats(6380, nil)
+	stats := NewServerStats(&Config{Addr: ":6380"})
 
 	t.Run("initial stats", func(t *testing.T) {
 		statsManager := stats.GetStats()
@@ -23,7 +23,7 @@ func TestServerStats(t *testing.T) {
 
 	t.Run("connection tracking", func(t *testing.T) {
 		// Reset stats
-		stats = NewServerStats(6380, nil)
+		stats = NewServerStats(&Config{Addr: ":6380"})
 
 		// Simulate connections
 		stats.IncrementConnectedClients()
@@ -40,7 +40,7 @@ func TestServerStats(t *testing.T) {
 
 	t.Run("command tracking", func(t *testing.T) {
 		// Reset stats
-		stats = NewServerStats(6380, nil)
+		stats = NewServerStats(&Config{Addr: ":6380"})
 
 		// Simulate commands
 		stats.IncrementCommandsProcessed()
@@ -53,7 +53,7 @@ func TestServerStats(t *testing.T) {
 
 	t.Run("uptime tracking", func(t *testing.T) {
 		// Reset stats
-		stats = NewServerStats(6380, nil)
+		stats = NewServerStats(&Config{Addr: ":6380"})
 
 		initialSnapshot := stats.GetStats().GetSnapshot()
 		initialUptime := initialSnapshot.Uptime
@@ -75,7 +75,7 @@ func TestServerStats(t *testing.T) {
 
 	t.Run("network tracking", func(t *testing.T) {
 		// Reset stats
-		stats = NewServerStats(6380, nil)
+		stats = NewServerStats(&Config{Addr: ":6380"})
 
 		// Test network byte tracking
 		stats.AddNetInputBytes(100)
@@ -90,7 +90,7 @@ func TestServerStats(t *testing.T) {
 
 	t.Run("connection received tracking", func(t *testing.T) {
 		// Reset stats
-		stats = NewServerStats(6380, nil)
+		stats = NewServerStats(&Config{Addr: ":6380"})
 
 		// Test connection tracking
 		stats.IncrementConnectionsReceived()
@@ -99,5 +99,33 @@ func TestServerStats(t *testing.T) {
 
 		statsManager := stats.GetStats()
 		assert.Equal(t, int64(3), statsManager.GetTotalConnectionsReceived())
+	})
+
+	t.Run("connection received rejection", func(t *testing.T) {
+		// Reset stats
+		stats = NewServerStats(&Config{Addr: ":6380"})
+
+		// Test connection tracking
+		stats.IncrementRejectedConnections()
+		stats.IncrementRejectedConnections()
+		stats.IncrementRejectedConnections()
+
+		statsManager := stats.GetStats()
+		assert.Equal(t, int64(3), statsManager.GetRejectedConnections())
+	})
+
+	t.Run("invalid server addr", func(t *testing.T) {
+		stats = NewServerStats(&Config{Addr: "127.0.0.1:"})
+
+		assert.Equal(t, stats.port, 6380)
+	})
+
+	t.Run("update memory stats", func(t *testing.T) {
+		stats = NewServerStats(&Config{Addr: ":6380"})
+
+		stats.UpdateMemoryStats()
+
+		assert.NotZero(t, stats.GetStats().GetUsedMemory())
+		assert.NotZero(t, stats.GetStats().GetPeakMemory())
 	})
 }

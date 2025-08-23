@@ -1,7 +1,9 @@
 package server
 
 import (
+	"fmt"
 	"runtime"
+	"strings"
 
 	"gridhouse/internal/stats"
 )
@@ -13,13 +15,27 @@ type ServerStats struct {
 }
 
 // NewServerStats creates a new ServerStats instance
-func NewServerStats(port int, persistenceManager interface{}) *ServerStats {
+func NewServerStats(cfg *Config) *ServerStats {
 	statsManager := stats.NewOptimizedStatsManager()
+
+	port := 6380 // default
+	if cfg.Addr != "" {
+		// Parse port from address like ":6381" or "127.0.0.1:6381"
+		if strings.Contains(cfg.Addr, ":") {
+			parts := strings.Split(cfg.Addr, ":")
+			if len(parts) > 1 {
+				if parsedPort, err := fmt.Sscanf(parts[len(parts)-1], "%d", &port); err != nil || parsedPort != 1 {
+					port = 6380 // fallback to default
+				}
+			}
+		}
+	}
 
 	// Set initial memory stats
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	statsManager.SetUsedMemory(int64(m.Alloc))
+	statsManager.SetMaxConnections(cfg.MaxConnections)
 
 	return &ServerStats{
 		statsManager: statsManager,
@@ -60,6 +76,11 @@ func (s *ServerStats) IncrementCommandsProcessed() {
 // IncrementConnectionsReceived increments the connections received counter
 func (s *ServerStats) IncrementConnectionsReceived() {
 	s.statsManager.IncrementConnectionsReceived()
+}
+
+// IncrementRejectedConnections increments the rejected connection received counter
+func (s *ServerStats) IncrementRejectedConnections() {
+	s.statsManager.IncrementRejectedConnections()
 }
 
 // AddNetInputBytes adds bytes to the total input bytes counter

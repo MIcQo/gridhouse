@@ -501,6 +501,11 @@ func (wdb *WatchAwareDB) GetOrCreateHash(key string) *store.Hash {
 	return wdb.db.GetOrCreateHash(key)
 }
 
+// GetOrCreateHash delegates to the underlying database
+func (wdb *WatchAwareDB) GetOrCreateStream(key string) *store.Stream {
+	return wdb.db.GetOrCreateStream(key)
+}
+
 // GetDataType delegates to the underlying database
 func (wdb *WatchAwareDB) GetDataType(key string) store.DataType {
 	// For now, return TypeString as default

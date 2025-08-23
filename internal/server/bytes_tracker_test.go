@@ -9,7 +9,7 @@ import (
 )
 
 func TestBytesTracker(t *testing.T) {
-	stats := NewServerStats(6380, nil)
+	stats := NewServerStats(&Config{Addr: ":6380"})
 
 	// Create a mock connection
 	mockConnection := &mockConn{
@@ -45,7 +45,7 @@ func TestBytesTracker(t *testing.T) {
 
 	t.Run("cumulative tracking", func(t *testing.T) {
 		// Reset stats
-		stats = NewServerStats(6380, nil)
+		stats = NewServerStats(&Config{Addr: ":6380"})
 
 		// Create a new mock connection for this test
 		newMockConnection := &mockConn{

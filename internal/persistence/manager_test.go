@@ -37,6 +37,7 @@ func TestPersistenceManagerAOFOnly(t *testing.T) {
 	// Append commands to AOF
 	require.NoError(t, manager.AppendCommand("SET", []string{"key1", "value1"}))
 	require.NoError(t, manager.AppendCommand("SET", []string{"key2", "value2"}))
+	require.NoError(t, manager.AppendMultiCommands("SET", []string{"key3", "value3"}))
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -50,6 +51,7 @@ func TestPersistenceManagerAOFOnly(t *testing.T) {
 	require.True(t, stats["aof_enabled"].(bool))
 	require.False(t, stats["rdb_enabled"].(bool))
 	require.Equal(t, 0, stats["changes_since"].(int)) // cannot track changes
+	require.Equal(t, config, manager.GetConfig())
 }
 
 func TestPersistenceManagerRDBOnly(t *testing.T) {

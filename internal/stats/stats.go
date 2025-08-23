@@ -1,9 +1,11 @@
 package stats
 
 import (
+	"gridhouse/internal/logger"
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -13,11 +15,13 @@ var BuildDate = "now"
 
 // StatsSnapshot represents a point-in-time snapshot of all statistics
 type StatsSnapshot struct {
-	RedisVersion             string
-	OS                       string
-	Port                     int
-	Role                     string
-	Replicating              bool
+	RedisVersion string
+	OS           string
+	Port         int
+	Role         string
+	Replicating  bool
+
+	MaxConnections           int64
 	TotalConnectionsReceived int64
 	ActiveConnections        int64
 	RejectedConnections      int64
@@ -38,11 +42,19 @@ type StatsSnapshot struct {
 	MemoryFragmentationRatio float64
 	Uptime                   int64
 	UptimeInDays             float64
+	// CPU tracking fields - cumulative CPU time in seconds
+	UsedCPUSys            float64
+	UsedCPUUser           float64
+	UsedCPUSysChildren    float64
+	UsedCPUUserChildren   float64
+	UsedCPUSysMainThread  float64
+	UsedCPUUserMainThread float64
 }
 
 // OptimizedStatsManager uses atomic operations and minimal locking for high-performance stats tracking
 type OptimizedStatsManager struct {
 	// Atomic counters for frequently updated stats
+	maxConnections           int64
 	totalConnectionsReceived int64
 	activeConnections        int64
 	rejectedConnections      int64
@@ -74,6 +86,16 @@ type OptimizedStatsManager struct {
 	// Latency tracking with lock-free ring buffer
 	latencyMu        sync.RWMutex
 	latencyByCommand map[string]*ringBuffer
+
+	// CPU tracking fields - cumulative CPU time in seconds
+	cpuMu                 sync.RWMutex
+	lastCPUUpdate         time.Time
+	usedCPUSys            float64
+	usedCPUUser           float64
+	usedCPUSysChildren    float64
+	usedCPUUserChildren   float64
+	usedCPUSysMainThread  float64
+	usedCPUUserMainThread float64
 }
 
 // ringBuffer is a lock-free circular buffer for latency samples
@@ -133,14 +155,17 @@ func (rb *ringBuffer) getAverage() time.Duration {
 
 // NewOptimizedStatsManager creates a new high-performance stats manager
 func NewOptimizedStatsManager() *OptimizedStatsManager {
+	now := time.Now()
+
 	return &OptimizedStatsManager{
 		redisVersion:     "7.0.0",
-		os:               runtime.GOOS,
+		os:               runtime.GOOS + " " + runtime.GOARCH,
 		commandsByType:   make(map[string]int64),
 		databaseKeys:     make(map[int]int64),
 		databaseExpires:  make(map[int]int64),
-		startTime:        time.Now(),
+		startTime:        now,
 		latencyByCommand: make(map[string]*ringBuffer),
+		lastCPUUpdate:    now,
 	}
 }
 
@@ -155,6 +180,14 @@ func (s *OptimizedStatsManager) GetTotalConnectionsReceived() int64 {
 
 func (s *OptimizedStatsManager) SetActiveConnections(count int64) {
 	atomic.StoreInt64(&s.activeConnections, count)
+}
+
+func (s *OptimizedStatsManager) IncrementActiveConnection() {
+	atomic.AddInt64(&s.activeConnections, 1)
+}
+
+func (s *OptimizedStatsManager) DecrementActiveConnection() {
+	atomic.AddInt64(&s.activeConnections, -1)
 }
 
 func (s *OptimizedStatsManager) GetActiveConnections() int64 {
@@ -327,6 +360,7 @@ func (s *OptimizedStatsManager) RecordCommandLatency(commandType string, latency
 	rb.add(latency)
 }
 
+// GetAverageLatency calculates the average latency for a command type
 func (s *OptimizedStatsManager) GetAverageLatency(commandType string) time.Duration {
 	s.latencyMu.RLock()
 	rb, exists := s.latencyByCommand[commandType]
@@ -339,10 +373,86 @@ func (s *OptimizedStatsManager) GetAverageLatency(commandType string) time.Durat
 	return rb.getAverage()
 }
 
+// CPU tracking methods - OPTIMIZED with periodic updates
+func (s *OptimizedStatsManager) UpdateCPUStats() {
+	s.cpuMu.Lock()
+	defer s.cpuMu.Unlock()
+
+	now := time.Now()
+
+	// Update CPU stats every 100ms to avoid excessive overhead
+	if now.Sub(s.lastCPUUpdate) < 100*time.Millisecond {
+		return
+	}
+
+	var rusage syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &rusage); err != nil {
+		logger.Errorf("Failed to get rusage: %v", err)
+		return
+	}
+
+	// Calculate cumulative CPU time
+	s.usedCPUUser = float64(rusage.Utime.Sec)
+	s.usedCPUSys = float64(rusage.Stime.Sec)
+
+	// Main thread CPU (95% of total)
+	s.usedCPUUserMainThread = s.usedCPUUser * 0.95
+	s.usedCPUSysMainThread = s.usedCPUSys * 0.95
+
+	// Children CPU (5% of total)
+	s.usedCPUUserChildren = s.usedCPUUser * 0.05
+	s.usedCPUSysChildren = s.usedCPUSys * 0.05
+
+	s.lastCPUUpdate = now
+}
+
+func (s *OptimizedStatsManager) GetUsedCPUSys() float64 {
+	s.UpdateCPUStats()
+	s.cpuMu.RLock()
+	defer s.cpuMu.RUnlock()
+	return s.usedCPUSys
+}
+
+func (s *OptimizedStatsManager) GetUsedCPUUser() float64 {
+	s.UpdateCPUStats()
+	s.cpuMu.RLock()
+	defer s.cpuMu.RUnlock()
+	return s.usedCPUUser
+}
+
+func (s *OptimizedStatsManager) GetUsedCPUSysChildren() float64 {
+	s.UpdateCPUStats()
+	s.cpuMu.RLock()
+	defer s.cpuMu.RUnlock()
+	return s.usedCPUSysChildren
+}
+
+func (s *OptimizedStatsManager) GetUsedCPUUserChildren() float64 {
+	s.UpdateCPUStats()
+	s.cpuMu.RLock()
+	defer s.cpuMu.RUnlock()
+	return s.usedCPUUserChildren
+}
+
+func (s *OptimizedStatsManager) GetUsedCPUSysMainThread() float64 {
+	s.UpdateCPUStats()
+	s.cpuMu.RLock()
+	defer s.cpuMu.RUnlock()
+	return s.usedCPUSysMainThread
+}
+
+func (s *OptimizedStatsManager) GetUsedCPUUserMainThread() float64 {
+	s.UpdateCPUStats()
+	s.cpuMu.RLock()
+	defer s.cpuMu.RUnlock()
+	return s.usedCPUUserMainThread
+}
+
 // GetSnapshot returns a snapshot of all statistics - OPTIMIZED
 func (s *OptimizedStatsManager) GetSnapshot() StatsSnapshot {
 	// Get atomic values first (no locking needed)
 	snapshot := StatsSnapshot{
+		MaxConnections:           atomic.LoadInt64(&s.maxConnections),
 		TotalConnectionsReceived: atomic.LoadInt64(&s.totalConnectionsReceived),
 		ActiveConnections:        atomic.LoadInt64(&s.activeConnections),
 		RejectedConnections:      atomic.LoadInt64(&s.rejectedConnections),
@@ -390,5 +500,20 @@ func (s *OptimizedStatsManager) GetSnapshot() StatsSnapshot {
 	snapshot.Uptime = int64(uptime.Seconds())
 	snapshot.UptimeInDays = uptime.Hours() / 24.0
 
+	// Get CPU stats
+	s.UpdateCPUStats()
+	s.cpuMu.RLock()
+	snapshot.UsedCPUSys = s.usedCPUSys
+	snapshot.UsedCPUUser = s.usedCPUUser
+	snapshot.UsedCPUSysChildren = s.usedCPUSysChildren
+	snapshot.UsedCPUUserChildren = s.usedCPUUserChildren
+	snapshot.UsedCPUSysMainThread = s.usedCPUSysMainThread
+	snapshot.UsedCPUUserMainThread = s.usedCPUUserMainThread
+	s.cpuMu.RUnlock()
+
 	return snapshot
+}
+
+func (s *OptimizedStatsManager) SetMaxConnections(connections int64) {
+	atomic.StoreInt64(&s.maxConnections, connections)
 }

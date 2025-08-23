@@ -5,6 +5,7 @@ import (
 	"gridhouse/internal/resp"
 	"gridhouse/internal/stats"
 	"gridhouse/internal/store"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ type Store interface {
 	GetOrCreateList(key string) *store.List
 	GetOrCreateSet(key string) *store.Set
 	GetOrCreateHash(key string) *store.Hash
+	GetOrCreateStream(key string) *store.Stream
 }
 
 // Handler represents a command handler function
@@ -197,14 +199,32 @@ func InfoHandler(statsProvider interface{}) Handler {
 			}
 			return "# Server\r\n" +
 				fmt.Sprintf("redis_version:%s\r\n", snap.RedisVersion) +
+				fmt.Sprintf("redis_mode:%s\r\n", "standalone") +
 				fmt.Sprintf("os:%s\r\n", snap.OS) +
 				fmt.Sprintf("tcp_port:%d\r\n", port) +
-				fmt.Sprintf("role:%s\r\n", role)
+				fmt.Sprintf("process_id:%d\r\n", os.Getpid()) +
+				fmt.Sprintf("process_supervised:%s\r\n", "unknown") +
+				fmt.Sprintf("role:%s\r\n", role) +
+				fmt.Sprintf("uptime_in_days:%.2f\r\n", snap.UptimeInDays) +
+				fmt.Sprintf("uptime_in_seconds:%d\r\n", snap.Uptime)
 		}
 		buildClients := func() string {
 			return "# Clients\r\n" +
+				fmt.Sprintf("maxclients:%d\r\n", snap.MaxConnections) +
 				fmt.Sprintf("connected_clients:%d\r\n", snap.ActiveConnections) +
-				"blocked_clients:0\r\n"
+				fmt.Sprintf("blocked_clients:%d\r\n", 0) + // TODO: since blocking commands are not part of gridhouse yet, we print 0
+				fmt.Sprintf("tracking_clients:%d\r\n", 0) + // TODO: since tracing commands are not part of gridhouse yet, we print 0
+				fmt.Sprintf("pubsub_clients:%d\r\n", 0) + // TODO: since pubsub commands are not part of gridhouse yet, we print 0
+				fmt.Sprintf("watching_clients:%d\r\n", 0) // TODO: since watching commands are not part of gridhouse yet, we print 0
+		}
+		buildCPU := func() string {
+			return "# CPU\r\n" +
+				fmt.Sprintf("used_cpu_sys:%.6f\r\n", snap.UsedCPUSys) +
+				fmt.Sprintf("used_cpu_user:%.6f\r\n", snap.UsedCPUUser) +
+				fmt.Sprintf("used_cpu_sys_children:%.6f\r\n", snap.UsedCPUSysChildren) +
+				fmt.Sprintf("used_cpu_user_children:%.6f\r\n", snap.UsedCPUUserChildren) +
+				fmt.Sprintf("used_cpu_sys_main_thread:%.6f\r\n", snap.UsedCPUSysMainThread) +
+				fmt.Sprintf("used_cpu_user_main_thread:%.6f\r\n", snap.UsedCPUUserMainThread)
 		}
 		buildMemory := func() string {
 			return "# Memory\r\n" +
@@ -214,7 +234,10 @@ func InfoHandler(statsProvider interface{}) Handler {
 		buildStats := func() string {
 			return "# Stats\r\n" +
 				fmt.Sprintf("total_connections_received:%d\r\n", snap.TotalConnectionsReceived) +
-				fmt.Sprintf("total_commands_processed:%d\r\n", snap.TotalCommandsProcessed)
+				fmt.Sprintf("total_commands_processed:%d\r\n", snap.TotalCommandsProcessed) +
+				fmt.Sprintf("acl_access_denied_auth:%d\r\n", 0) + // TODO: we need to add counter for denied accesses
+				fmt.Sprintf("total_reads_processed:%d\r\n", 0) + // TODO: we need to add counter for read commands
+				fmt.Sprintf("total_writes_processed:%d\r\n", 0) // TODO: we need to add counter for write commands
 		}
 		buildCommands := func() string {
 			b := strings.Builder{}
@@ -255,22 +278,26 @@ func InfoHandler(statsProvider interface{}) Handler {
 
 		var info strings.Builder
 		switch section {
-		case "server":
+		case "SERVER", "server":
 			info.WriteString(buildServer())
-		case "clients":
+		case "CLIENTS", "clients":
 			info.WriteString(buildClients())
-		case "memory":
+		case "MEMORY", "memory":
 			info.WriteString(buildMemory())
-		case "stats":
+		case "STATS", "stats":
 			info.WriteString(buildStats())
-		case "commands":
+		case "COMMANDS", "commands":
 			info.WriteString(buildCommands())
-		case "keyspace":
+		case "KEYSPACE", "keyspace":
 			info.WriteString(buildKeyspace())
+		case "CPU", "cpu":
+			info.WriteString(buildCPU())
 		case "":
 			info.WriteString(buildServer())
 			info.WriteString("\r\n")
 			info.WriteString(buildClients())
+			info.WriteString("\r\n")
+			info.WriteString(buildCPU())
 			info.WriteString("\r\n")
 			info.WriteString(buildMemory())
 			info.WriteString("\r\n")

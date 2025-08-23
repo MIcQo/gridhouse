@@ -90,6 +90,16 @@ func (m *mockMemoryStore) GetOrCreateHash(key string) *store.Hash {
 	m.data[key] = hash
 	return hash
 }
+func (m *mockMemoryStore) GetOrCreateStream(key string) *store.Stream {
+	if val, ok := m.data[key]; ok {
+		if stream, ok := val.(*store.Stream); ok {
+			return stream
+		}
+	}
+	stream := store.NewStream()
+	m.data[key] = stream
+	return stream
+}
 
 func TestMemoryCommandUsage(t *testing.T) {
 	store := newMockMemoryStore()

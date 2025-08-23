@@ -18,6 +18,7 @@ import (
 
 const defaultReadBuffer = 256 * 1024
 const defaultWriteBuffer = 0
+const maxConnections = 1000
 
 // rootCmd represents base command when called without subcommands
 var rootCmd = &cobra.Command{
@@ -52,12 +53,13 @@ Supports basic Redis commands like SET, GET, PING, ECHO with TTL support.`,
 
 		// Create server with ultra-fast execution
 		srv := server.New(server.Config{
-			Addr:        getStringFlag(cmd, "port", ":6380"),
-			Persistence: persistConfig,
-			Password:    getStringFlag(cmd, "requirepass", ""),
-			SlaveOf:     getStringFlag(cmd, "slaveof", ""),
-			ReadBuffer:  getIntFlag(cmd, "read-buffer", defaultReadBuffer),
-			WriteBuffer: getIntFlag(cmd, "write-buffer", defaultWriteBuffer),
+			Addr:           getStringFlag(cmd, "port", ":6380"),
+			Persistence:    persistConfig,
+			Password:       getStringFlag(cmd, "requirepass", ""),
+			SlaveOf:        getStringFlag(cmd, "slaveof", ""),
+			ReadBuffer:     getIntFlag(cmd, "read-buffer", defaultReadBuffer),
+			WriteBuffer:    getIntFlag(cmd, "write-buffer", defaultWriteBuffer),
+			MaxConnections: getInt64Flag(cmd, "max-connections", maxConnections),
 		})
 
 		// Start server
@@ -117,6 +119,7 @@ func init() {
 	rootCmd.Flags().String("port", ":6380", "Server port")
 	rootCmd.Flags().Int("write-buffer", defaultWriteBuffer, "Writer buffer size")
 	rootCmd.Flags().Int("read-buffer", defaultReadBuffer, "Writer buffer size")
+	rootCmd.Flags().Int64("max-connections", maxConnections, "Maximum allowed connections from clients")
 
 	// auth
 	rootCmd.Flags().String("requirepass", "", "Password for AUTH command")

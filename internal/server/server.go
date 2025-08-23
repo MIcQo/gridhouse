@@ -13,12 +13,11 @@ import (
 	"net"
 	"net/http"
 	_ "net/http/pprof"
-	"runtime"
+	"os"
 	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -39,12 +38,13 @@ var pipelineResponsePool = sync.Pool{
 }
 
 type Config struct {
-	Addr        string
-	Persistence *persistence.Config
-	Password    string // Optional password for AUTH command
-	SlaveOf     string // Master address for replication
-	WriteBuffer int
-	ReadBuffer  int
+	Addr           string
+	Persistence    *persistence.Config
+	Password       string // Optional password for AUTH command
+	SlaveOf        string // Master address for replication
+	WriteBuffer    int
+	ReadBuffer     int
+	MaxConnections int64
 }
 
 type Server struct {
@@ -63,7 +63,6 @@ type Server struct {
 
 	// Memory management
 	memoryLimit int64 // Memory limit in bytes
-	activeConns int32 // Atomic counter for active connections
 
 	// Transaction management
 	tm *cmd.TransactionManager // Transaction manager for ACID compliance
@@ -78,22 +77,8 @@ func New(cfg Config) *Server {
 	// Initialize transaction manager for ACID compliance
 	tm := cmd.NewTransactionManager(db)
 
-	// Extract port from address for stats
-	port := 6380 // default
-	if cfg.Addr != "" {
-		// Parse port from address like ":6381" or "127.0.0.1:6381"
-		if strings.Contains(cfg.Addr, ":") {
-			parts := strings.Split(cfg.Addr, ":")
-			if len(parts) > 1 {
-				if parsedPort, err := fmt.Sscanf(parts[len(parts)-1], "%d", &port); err != nil || parsedPort != 1 {
-					port = 6380 // fallback to default
-				}
-			}
-		}
-	}
-
 	// Initialize server stats
-	stats := NewServerStats(port, nil)
+	stats := NewServerStats(&cfg)
 
 	server := &Server{
 		cfg:           cfg,
@@ -104,7 +89,6 @@ func New(cfg Config) *Server {
 		connSemaphore: make(chan struct{}, 50000), // Increased to 50K connections
 		// REMOVED: workerPool - eliminated to prevent scaling bottleneck
 		memoryLimit: 4 * 1024 * 1024 * 1024, // 4GB memory limit for large test runs
-		activeConns: 0,
 	}
 
 	// Initialize persistence if configured
@@ -161,9 +145,13 @@ func (s *Server) Start() error {
 	s.addr = ln.Addr().String()
 	logger.Infof("Server listening on %s", s.addr)
 	go s.serve()
-	go func() {
-		http.ListenAndServe("localhost:6060", nil)
-	}()
+
+	if v, ok := os.LookupEnv("PROFILING_ENABLED"); ok && (v == "1" || v == "true") {
+		go func() {
+			logger.Fatal(http.ListenAndServe("localhost:6060", nil))
+		}()
+	}
+
 	return nil
 }
 
@@ -172,9 +160,8 @@ func (s *Server) Addr() string { return s.addr }
 // shouldRejectConnection checks if we should reject connection
 func (s *Server) shouldRejectConnection() bool {
 	// Check memory usage
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-
+	// var m runtime.MemStats
+	// runtime.ReadMemStats(&m)
 	// Reject if memory usage exceeds limit
 	// if m.Alloc > uint64(s.memoryLimit) {
 	// 	logger.Warnf("Memory limit exceeded: %d MB", m.Alloc/(1024*1024))
@@ -182,8 +169,8 @@ func (s *Server) shouldRejectConnection() bool {
 	// }
 
 	// Reject if too many active connections
-	if atomic.LoadInt32(&s.activeConns) > 8000 {
-		logger.Warnf("Too many active connections: %d", atomic.LoadInt32(&s.activeConns))
+	if s.stats.GetStats().GetActiveConnections() > s.cfg.MaxConnections {
+		logger.Warnf("Too many active connections: %d", s.stats.GetStats().GetActiveConnections())
 		return true
 	}
 
@@ -229,7 +216,8 @@ func (s *Server) serve() {
 
 		// Check memory usage and circuit breaker
 		if s.shouldRejectConnection() {
-			logger.Warnf("Memory pressure or high load, rejecting connection from %s", c.RemoteAddr())
+			logger.Warnf("rejecting connection from %s", c.RemoteAddr())
+			s.stats.IncrementRejectedConnections()
 			c.Close()
 			continue
 		}
@@ -238,20 +226,22 @@ func (s *Server) serve() {
 		select {
 		case s.connSemaphore <- struct{}{}:
 			// Connection accepted
-			atomic.AddInt32(&s.activeConns, 1)
-			logger.Debugf("Connection accepted from %s (active: %d)", c.RemoteAddr(), atomic.LoadInt32(&s.activeConns))
+			s.stats.IncrementConnectedClients()
+			s.stats.IncrementConnectionsReceived()
+
+			if logger.GetLevel() == logger.DebugLevel {
+				logger.Debugf("connection accepted from %s (active: %d)", c.RemoteAddr(), s.stats.GetStats().GetActiveConnections())
+			}
 		default:
 			// Connection limit reached, close connection
-			logger.Warnf("Connection limit reached, rejecting connection from %s", c.RemoteAddr())
+			logger.Warnf("connection limit reached, rejecting connection from %s", c.RemoteAddr())
+			s.stats.IncrementRejectedConnections()
 			c.Close()
 			continue
 		}
 
 		// Track new connection
-		s.stats.IncrementConnectedClients()
-		s.stats.IncrementConnectionsReceived()
-
-		logger.Debugf("New connection accepted from %s", c.RemoteAddr())
+		logger.Infof("New connection accepted from %s", c.RemoteAddr())
 
 		// Wrap connection with tracking and unique ID
 		trackedConn := newConnectionTracker(c, s.stats)
@@ -262,7 +252,8 @@ func (s *Server) serve() {
 				if r := recover(); r != nil {
 					logger.Errorf("Panic in connection handler: %v", r)
 				}
-				atomic.AddInt32(&s.activeConns, -1)
+				logger.Infof("connection closed from %s", c.RemoteAddr())
+				s.stats.DecrementConnectedClients()
 				<-s.connSemaphore // Release connection slot only
 			}()
 			s.handle(conn)
@@ -638,7 +629,7 @@ func (s *Server) handle(conn net.Conn) {
 			}
 		} else {
 			// Single command mode: execute and flush immediately
-			logger.Debugf("Executing single command via registry: %s", command)
+			logger.Debugf("Executing single command via registry: %s, args: %v", command, args)
 
 			// Ultra-fast path for most common commands
 			var fastPathErr error
@@ -671,7 +662,7 @@ func (s *Server) handle(conn net.Conn) {
 						isWriteCommand = true
 						logger.Debugf("Detected write command: %s (ReadOnly: %v)", command, cmdInfo.ReadOnly)
 					} else {
-						logger.Debugf("Command %s is read-only or not found (exists: %v)", command, exists)
+						logger.Debugf("Command %s is read-only or not found (exists: %v) with args: %v", command, exists, args)
 					}
 				}
 			}

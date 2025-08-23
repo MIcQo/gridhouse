@@ -125,6 +125,9 @@ func (m *MockStore) GetOrCreateHash(key string) *store.Hash {
 func (m *MockStore) GetOrCreateSortedSet(key string) *store.SortedSet {
 	return store.NewSortedSet()
 }
+func (m *MockStore) GetOrCreateStream(key string) *store.Stream {
+	return store.NewStream()
+}
 
 func (m *MockStore) GetDataType(key string) store.DataType {
 	return store.TypeString

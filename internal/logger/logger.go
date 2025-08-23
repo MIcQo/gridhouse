@@ -120,3 +120,22 @@ func WithField(key string, value interface{}) *logrus.Entry {
 func WithFields(fields logrus.Fields) *logrus.Entry {
 	return Get().WithFields(fields)
 }
+
+func GetLevel() LogLevel {
+	switch logrus.GetLevel() {
+	case logrus.DebugLevel:
+		return DebugLevel
+	case logrus.InfoLevel:
+		return InfoLevel
+	case logrus.WarnLevel:
+		return WarnLevel
+	case logrus.ErrorLevel:
+		return ErrorLevel
+	case logrus.PanicLevel:
+		return PanicLevel
+	case logrus.FatalLevel:
+		return FatalLevel
+	default:
+		return InfoLevel
+	}
+}

@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"fmt"
 	"runtime"
 	"testing"
 
@@ -25,10 +26,11 @@ func TestStatsManager(t *testing.T) {
 func TestServerInfo(t *testing.T) {
 	stats := NewOptimizedStatsManager()
 
+	var expectedOs = fmt.Sprintf("%s %s", runtime.GOOS, runtime.GOARCH)
 	// Test initial server info (optimized version has hardcoded values)
 	snapshot := stats.GetSnapshot()
 	assert.Equal(t, Version, snapshot.RedisVersion)
-	assert.Equal(t, runtime.GOOS, snapshot.OS)
+	assert.Equal(t, expectedOs, snapshot.OS)
 	assert.Equal(t, 0, snapshot.Port)            // Port is not set in constructor
 	assert.Equal(t, "", snapshot.Role)           // Role is not set in constructor
 	assert.Equal(t, false, snapshot.Replicating) // Replicating is not set in constructor
@@ -37,26 +39,44 @@ func TestServerInfo(t *testing.T) {
 func TestConnectionTracking(t *testing.T) {
 	stats := NewOptimizedStatsManager()
 
-	// Test connection received
-	stats.IncrementConnectionsReceived()
-	assert.Equal(t, int64(1), stats.GetTotalConnectionsReceived())
+	t.Run("test connection received", func(t *testing.T) {
+		// Test connection received
+		stats.IncrementConnectionsReceived()
+		assert.Equal(t, int64(1), stats.GetTotalConnectionsReceived())
 
-	stats.IncrementConnectionsReceived()
-	assert.Equal(t, int64(2), stats.GetTotalConnectionsReceived())
+		stats.IncrementConnectionsReceived()
+		assert.Equal(t, int64(2), stats.GetTotalConnectionsReceived())
+	})
 
-	// Test rejected connections
-	stats.IncrementRejectedConnections()
-	assert.Equal(t, int64(1), stats.GetRejectedConnections())
+	t.Run("test rejected connections", func(t *testing.T) {
+		// Test rejected connections
+		stats.IncrementRejectedConnections()
+		assert.Equal(t, int64(1), stats.GetRejectedConnections())
 
-	stats.IncrementRejectedConnections()
-	assert.Equal(t, int64(2), stats.GetRejectedConnections())
+		stats.IncrementRejectedConnections()
+		assert.Equal(t, int64(2), stats.GetRejectedConnections())
+	})
 
-	// Test active connections
-	stats.SetActiveConnections(5)
-	assert.Equal(t, int64(5), stats.GetActiveConnections())
+	t.Run("test active connections", func(t *testing.T) {
+		// Test active connections
+		stats.SetActiveConnections(5)
+		assert.Equal(t, int64(5), stats.GetActiveConnections())
 
-	stats.SetActiveConnections(3)
-	assert.Equal(t, int64(3), stats.GetActiveConnections())
+		stats.SetActiveConnections(3)
+		assert.Equal(t, int64(3), stats.GetActiveConnections())
+
+		stats.IncrementActiveConnection()
+		assert.Equal(t, int64(4), stats.GetActiveConnections())
+
+		stats.DecrementActiveConnection()
+		assert.Equal(t, int64(3), stats.GetActiveConnections())
+	})
+
+	t.Run("max connections", func(t *testing.T) {
+		stats.SetMaxConnections(1000)
+		assert.Equal(t, int64(1000), stats.maxConnections)
+	})
+
 }
 
 func TestCommandTracking(t *testing.T) {
@@ -177,16 +197,25 @@ func TestNetworkTracking(t *testing.T) {
 func TestMemoryTracking(t *testing.T) {
 	stats := NewOptimizedStatsManager()
 
-	// Test memory usage
-	stats.SetUsedMemory(1024 * 1024) // 1MB
-	assert.Equal(t, int64(1024*1024), stats.GetUsedMemory())
+	t.Run("test memory usage", func(t *testing.T) {
+		// Test memory usage
+		stats.SetUsedMemory(1024 * 1024) // 1MB
+		assert.Equal(t, int64(1024*1024), stats.GetUsedMemory())
 
-	stats.SetUsedMemory(2 * 1024 * 1024) // 2MB
-	assert.Equal(t, int64(2*1024*1024), stats.GetUsedMemory())
+		stats.SetUsedMemory(2 * 1024 * 1024) // 2MB
+		assert.Equal(t, int64(2*1024*1024), stats.GetUsedMemory())
+	})
 
-	// Test memory fragmentation
-	stats.SetMemoryFragmentationRatio(1.5)
-	assert.Equal(t, 1.5, stats.GetMemoryFragmentationRatio())
+	t.Run("memory fragmentation", func(t *testing.T) {
+		// Test memory fragmentation
+		stats.SetMemoryFragmentationRatio(1.5)
+		assert.Equal(t, 1.5, stats.GetMemoryFragmentationRatio())
+	})
+
+	t.Run("peak memory", func(t *testing.T) {
+		assert.NotZero(t, stats.GetPeakMemory())
+	})
+
 }
 
 func TestDatabaseTracking(t *testing.T) {
@@ -205,6 +234,40 @@ func TestUptimeTracking(t *testing.T) {
 	snapshot := stats.GetSnapshot()
 	assert.GreaterOrEqual(t, snapshot.Uptime, int64(0))
 	assert.GreaterOrEqual(t, snapshot.UptimeInDays, 0.0)
+}
+
+func TestCPUTracking(t *testing.T) {
+	stats := NewOptimizedStatsManager()
+
+	// Test initial CPU stats
+	snapshot := stats.GetSnapshot()
+	assert.GreaterOrEqual(t, snapshot.UsedCPUSys, 0.0)
+	assert.GreaterOrEqual(t, snapshot.UsedCPUUser, 0.0)
+	assert.GreaterOrEqual(t, snapshot.UsedCPUSysChildren, 0.0)
+	assert.GreaterOrEqual(t, snapshot.UsedCPUUserChildren, 0.0)
+	assert.GreaterOrEqual(t, snapshot.UsedCPUSysMainThread, 0.0)
+	assert.GreaterOrEqual(t, snapshot.UsedCPUUserMainThread, 0.0)
+
+	// Test CPU stats methods
+	assert.GreaterOrEqual(t, stats.GetUsedCPUSys(), 0.0)
+	assert.GreaterOrEqual(t, stats.GetUsedCPUUser(), 0.0)
+	assert.GreaterOrEqual(t, stats.GetUsedCPUSysChildren(), 0.0)
+	assert.GreaterOrEqual(t, stats.GetUsedCPUUserChildren(), 0.0)
+	assert.GreaterOrEqual(t, stats.GetUsedCPUSysMainThread(), 0.0)
+	assert.GreaterOrEqual(t, stats.GetUsedCPUUserMainThread(), 0.0)
+
+	// Simulate some activity to increase CPU usage
+	for i := 0; i < 1000; i++ {
+		_ = make([]byte, 1024) // Allocate memory to trigger GC
+	}
+
+	// Force CPU stats update
+	stats.UpdateCPUStats()
+
+	// Test that CPU stats have been updated
+	newSnapshot := stats.GetSnapshot()
+	assert.GreaterOrEqual(t, newSnapshot.UsedCPUSys, snapshot.UsedCPUSys)
+	assert.GreaterOrEqual(t, newSnapshot.UsedCPUUser, snapshot.UsedCPUUser)
 }
 
 // TestLatencyTracking removed - ring buffer implementation needs investigation

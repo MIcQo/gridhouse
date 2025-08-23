@@ -21,17 +21,16 @@ func (m *mockServerStatsProvider) GetStats() *stats.OptimizedStatsManager {
 // Mock replication manager removed - not used in current tests
 
 func TestInfoHandlerBasic(t *testing.T) {
-	// Mock server stats provider
-	mockStats := stats.NewOptimizedStatsManager()
-	mockStatsProvider := &mockServerStatsProvider{stats: mockStats}
+	// Create a mock stats provider
+	mockStats := &mockServerStatsProvider{
+		stats: stats.NewOptimizedStatsManager(),
+	}
 
-	handler := InfoHandler(mockStatsProvider)
+	handler := InfoHandler(mockStats)
 
-	// Test INFO with no arguments (default)
-	args := []resp.Value{}
-
-	result, err := handler(args)
-	require.NoError(t, err)
+	// Test basic INFO command
+	result, err := handler([]resp.Value{})
+	assert.NoError(t, err)
 	assert.Equal(t, resp.BulkString, result.Type)
 	assert.Contains(t, result.Str, "# Server")
 	assert.Contains(t, result.Str, "# Clients")
@@ -39,6 +38,28 @@ func TestInfoHandlerBasic(t *testing.T) {
 	assert.Contains(t, result.Str, "# Stats")
 	assert.Contains(t, result.Str, "# Commands")
 	assert.Contains(t, result.Str, "# Keyspace")
+	assert.Contains(t, result.Str, "# CPU")
+}
+
+func TestInfoHandlerCPU(t *testing.T) {
+	// Create a mock stats provider
+	mockStats := &mockServerStatsProvider{
+		stats: stats.NewOptimizedStatsManager(),
+	}
+
+	handler := InfoHandler(mockStats)
+
+	// Test CPU section specifically
+	result, err := handler([]resp.Value{{Type: resp.BulkString, Str: "cpu"}})
+	assert.NoError(t, err)
+	assert.Equal(t, resp.BulkString, result.Type)
+	assert.Contains(t, result.Str, "# CPU")
+	assert.Contains(t, result.Str, "used_cpu_sys:")
+	assert.Contains(t, result.Str, "used_cpu_user:")
+	assert.Contains(t, result.Str, "used_cpu_sys_children:")
+	assert.Contains(t, result.Str, "used_cpu_user_children:")
+	assert.Contains(t, result.Str, "used_cpu_sys_main_thread:")
+	assert.Contains(t, result.Str, "used_cpu_user_main_thread:")
 }
 
 func TestAuthHandler(t *testing.T) {

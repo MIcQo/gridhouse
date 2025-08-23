@@ -68,6 +68,9 @@ func (m *SimpleMockStore) GetOrCreateSet(key string) *store.Set {
 func (m *SimpleMockStore) GetOrCreateHash(key string) *store.Hash {
 	return store.NewHash()
 }
+func (m *SimpleMockStore) GetOrCreateStream(key string) *store.Stream {
+	return store.NewStream()
+}
 
 func (m *SimpleMockStore) GetDataType(key string) store.DataType {
 	return store.TypeString
