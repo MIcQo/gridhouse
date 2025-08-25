@@ -1,5 +1,6 @@
 # GridHouse
 [![codecov](https://codecov.io/github/MIcQo/gridhouse/graph/badge.svg?token=YBF6MA7FEH)](https://codecov.io/github/MIcQo/gridhouse)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/MIcQo/gridhouse/gotests.yml)
 
 A high-performance Redis-compatible in-memory database written in Go.
 
