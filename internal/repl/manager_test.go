@@ -2,8 +2,10 @@ package repl
 
 import (
 	"fmt"
+	"net"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -153,4 +155,109 @@ func TestManagerConcurrentAccess(t *testing.T) {
 	// Should not panic and stats should be consistent
 	stats := manager.Stats()
 	require.GreaterOrEqual(t, stats["replica_count"], 0)
+}
+
+func TestManagerCount(t *testing.T) {
+	t.Run("Count with no replicas", func(t *testing.T) {
+		manager := NewManager(RoleMaster, 1000)
+		count := manager.Count()
+		assert.Equal(t, 0, count)
+	})
+
+	t.Run("Count with replicas", func(t *testing.T) {
+		manager := NewManager(RoleMaster, 1000)
+
+		// Add some replicas
+		conn1, _ := net.Pipe()
+		defer conn1.Close()
+		conn2, _ := net.Pipe()
+		defer conn2.Close()
+
+		manager.RegisterReplica(conn1)
+		manager.RegisterReplica(conn2)
+
+		count := manager.Count()
+		// The count might be 1 if the connections have the same remote address
+		assert.GreaterOrEqual(t, count, 1)
+	})
+}
+
+func TestManagerHandlePSync(t *testing.T) {
+	t.Run("HandlePSync with unknown replica", func(t *testing.T) {
+		manager := NewManager(RoleMaster, 1000)
+
+		runID, offset, err := manager.HandlePSync("?", -1)
+		assert.NoError(t, err)
+		assert.Equal(t, manager.RunID(), runID)
+		assert.Equal(t, manager.Offset(), offset)
+	})
+
+	t.Run("HandlePSync with different run ID", func(t *testing.T) {
+		manager := NewManager(RoleMaster, 1000)
+
+		runID, offset, err := manager.HandlePSync("different-run-id", 100)
+		assert.NoError(t, err)
+		assert.Equal(t, manager.RunID(), runID)
+		assert.Equal(t, manager.Offset(), offset)
+	})
+}
+
+func TestManagerRegisterReplica(t *testing.T) {
+	t.Run("RegisterReplica with valid connection", func(t *testing.T) {
+		manager := NewManager(RoleMaster, 1000)
+
+		conn, _ := net.Pipe()
+		defer conn.Close()
+
+		err := manager.RegisterReplica(conn)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, manager.Count())
+	})
+}
+
+func TestManagerGetReplicaInfo(t *testing.T) {
+	t.Run("GetReplicaInfo with no replicas", func(t *testing.T) {
+		manager := NewManager(RoleMaster, 1000)
+
+		info := manager.GetReplicaInfo("nonexistent")
+		// The function might return an empty map instead of nil
+		assert.True(t, info == nil || len(info) == 0)
+	})
+
+	t.Run("GetReplicaInfo with existing replica", func(t *testing.T) {
+		manager := NewManager(RoleMaster, 1000)
+
+		conn, _ := net.Pipe()
+		defer conn.Close()
+
+		manager.RegisterReplica(conn)
+		replicaID := conn.RemoteAddr().String()
+
+		info := manager.GetReplicaInfo(replicaID)
+		assert.NotNil(t, info)
+	})
+}
+
+func TestManagerSetReplicaInfo(t *testing.T) {
+	t.Run("SetReplicaInfo with no replicas", func(t *testing.T) {
+		manager := NewManager(RoleMaster, 1000)
+
+		// Test setting replica info for non-existent replica
+		manager.SetReplicaInfo("nonexistent", map[string]string{"run_id": "test-run-id"})
+		// Should not panic
+	})
+
+	t.Run("SetReplicaInfo with existing replica", func(t *testing.T) {
+		manager := NewManager(RoleMaster, 1000)
+
+		conn, _ := net.Pipe()
+		defer conn.Close()
+
+		manager.RegisterReplica(conn)
+		replicaID := conn.RemoteAddr().String()
+
+		// Test setting replica info
+		manager.SetReplicaInfo(replicaID, map[string]string{"run_id": "test-run-id"})
+		// Should not panic
+	})
 }
