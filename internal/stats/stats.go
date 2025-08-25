@@ -1,12 +1,13 @@
 package stats
 
 import (
-	"gridhouse/internal/logger"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"gridhouse/internal/logger"
 )
 
 var Version = "7.0.0"
@@ -157,7 +158,7 @@ func (rb *ringBuffer) getAverage() time.Duration {
 func NewOptimizedStatsManager() *OptimizedStatsManager {
 	now := time.Now()
 
-	return &OptimizedStatsManager{
+	var osm = &OptimizedStatsManager{
 		redisVersion:     "7.0.0",
 		os:               runtime.GOOS + " " + runtime.GOARCH,
 		commandsByType:   make(map[string]int64),
@@ -167,6 +168,8 @@ func NewOptimizedStatsManager() *OptimizedStatsManager {
 		latencyByCommand: make(map[string]*ringBuffer),
 		lastCPUUpdate:    now,
 	}
+
+	return osm
 }
 
 // Connection tracking methods - OPTIMIZED with atomic operations
@@ -392,16 +395,22 @@ func (s *OptimizedStatsManager) UpdateCPUStats() {
 	}
 
 	// Calculate cumulative CPU time
-	s.usedCPUUser = float64(rusage.Utime.Sec)
-	s.usedCPUSys = float64(rusage.Stime.Sec)
+	s.usedCPUUser += float64(rusage.Utime.Sec)
+	s.usedCPUSys += float64(rusage.Stime.Sec)
 
-	// Main thread CPU (95% of total)
-	s.usedCPUUserMainThread = s.usedCPUUser * 0.95
-	s.usedCPUSysMainThread = s.usedCPUSys * 0.95
+	var rusageThread syscall.Rusage
+	if err := syscall.Getrusage(0x1, &rusageThread); err == nil {
+		// Main thread CPU (95% of total)
+		s.usedCPUUserMainThread += float64(rusageThread.Utime.Sec)
+		s.usedCPUSysMainThread += float64(rusageThread.Stime.Sec)
+	}
 
-	// Children CPU (5% of total)
-	s.usedCPUUserChildren = s.usedCPUUser * 0.05
-	s.usedCPUSysChildren = s.usedCPUSys * 0.05
+	var rusageChild syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_CHILDREN, &rusageChild); err == nil {
+		// Children CPU (5% of total)
+		s.usedCPUUserChildren += float64(rusageChild.Utime.Sec)
+		s.usedCPUSysChildren += float64(rusageChild.Stime.Sec)
+	}
 
 	s.lastCPUUpdate = now
 }
