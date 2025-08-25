@@ -221,7 +221,7 @@ func TestManagerGetReplicaInfo(t *testing.T) {
 
 		info := manager.GetReplicaInfo("nonexistent")
 		// The function might return an empty map instead of nil
-		assert.True(t, info == nil || len(info) == 0)
+		assert.True(t, len(info) == 0)
 	})
 
 	t.Run("GetReplicaInfo with existing replica", func(t *testing.T) {
