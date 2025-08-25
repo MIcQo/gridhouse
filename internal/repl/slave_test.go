@@ -91,38 +91,6 @@ func TestSlaveSendCommand(t *testing.T) {
 	})
 }
 
-func TestSlaveReadResponse(t *testing.T) {
-	t.Run("readResponse logic test", func(t *testing.T) {
-		// Test the logic without actual network reads to avoid deadlocks
-		// We can test that the function signature is correct
-		_ = NewSlave("127.0.0.1:6379", store.NewUltraOptimizedDB())
-	})
-}
-
-func TestSlaveReadCommand(t *testing.T) {
-	t.Run("readCommand logic test", func(t *testing.T) {
-		// Test the logic without actual network reads to avoid deadlocks
-		// We can test that the function signature is correct
-		_ = NewSlave("127.0.0.1:6379", store.NewUltraOptimizedDB())
-	})
-}
-
-func TestSlaveStartCommandStream(t *testing.T) {
-	t.Run("startCommandStream logic test", func(t *testing.T) {
-		// Test the logic without actual network operations to avoid deadlocks
-		// We can test that the function signature is correct
-		_ = NewSlave("127.0.0.1:6379", store.NewUltraOptimizedDB())
-	})
-}
-
-func TestSlaveReceiveRDBDump(t *testing.T) {
-	t.Run("receiveRDBDump logic test", func(t *testing.T) {
-		// Test the logic without actual network operations to avoid deadlocks
-		// We can test that the function signature is correct
-		_ = NewSlave("127.0.0.1:6379", store.NewUltraOptimizedDB())
-	})
-}
-
 func TestSlaveLoadRDBData(t *testing.T) {
 	t.Run("loadRDBData with empty data", func(t *testing.T) {
 		db := store.NewUltraOptimizedDB()
@@ -141,14 +109,6 @@ func TestSlaveLoadRDBData(t *testing.T) {
 		err := slave.loadRDBData([]byte("invalid rdb data"))
 		// This might fail due to invalid RDB format, but we can test the logic
 		_ = err
-	})
-}
-
-func TestSlavePerformHandshake(t *testing.T) {
-	t.Run("performHandshake logic test", func(t *testing.T) {
-		// Test the logic without actual network operations to avoid deadlocks
-		// We can test that the function signature is correct
-		_ = NewSlave("127.0.0.1:6379", store.NewUltraOptimizedDB())
 	})
 }
 
