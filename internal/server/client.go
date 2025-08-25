@@ -7,7 +7,6 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"time"
 )
 
 // QueuedCommand represents a command queued during a transaction
@@ -264,59 +263,4 @@ func (c *Client) executeCommand(command string, args []string) (resp.Value, erro
 		}
 		return response, nil
 	}
-}
-
-// Ultra-fast SET with direct buffer write
-func (c *Client) executeSetCommandFast(args []string) error {
-	if len(args) < 2 {
-		return c.writeRawAndFlush([]byte("-ERR wrong number of arguments for 'SET' command\r\n"))
-	}
-
-	key := args[0]
-	value := args[1]
-	expiration := time.Time{}
-
-	// Handle TTL options (EX, PX) case-insensitive
-	if len(args) >= 4 {
-		ttlType := args[2]
-		ttlValue := args[3]
-
-		switch ttlType {
-		case "EX", "ex":
-			if seconds, err := strconv.ParseInt(ttlValue, 10, 64); err == nil {
-				expiration = time.Now().Add(time.Duration(seconds) * time.Second)
-			}
-		case "PX", "px":
-			if milliseconds, err := strconv.ParseInt(ttlValue, 10, 64); err == nil {
-				expiration = time.Now().Add(time.Duration(milliseconds) * time.Millisecond)
-			}
-		}
-	}
-
-	c.server.db.Set(key, value, expiration)
-	return c.writeRawAndFlush(resp.OkResponse)
-}
-
-// Ultra-fast GET with direct buffer write
-func (c *Client) executeGetCommandFast(args []string) error {
-	if len(args) != 1 {
-		return c.writeRawAndFlush([]byte("-ERR wrong number of arguments for 'GET' command\r\n"))
-	}
-
-	value, exists := c.server.db.Get(args[0])
-	if !exists {
-		return c.writeRawAndFlush([]byte("$-1\r\n"))
-	}
-
-	response := c.buildBulkStringResponse(value, false)
-	return c.writeRawAndFlush(response)
-}
-
-// Ultra-fast PING with direct buffer write
-func (c *Client) executePingCommandFast(args []string) error {
-	if len(args) == 0 {
-		return c.writeRawAndFlush([]byte("+PONG\r\n"))
-	}
-	response := c.buildSimpleStringResponse(args[0])
-	return c.writeRawAndFlush(response)
 }

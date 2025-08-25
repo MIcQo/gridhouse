@@ -69,6 +69,8 @@ func (r *Reader) ReadAll(db store.DataStore) error {
 				z.ZAdd(map[string]float64{v.Member: v.Score})
 			}
 
+			z.Rebuild() // make sure that reads after startup is ready
+
 			println("zset", zset.Key, zset.Entries)
 		case parser.StreamType:
 			// Convert parser.StreamObject into our store.Stream

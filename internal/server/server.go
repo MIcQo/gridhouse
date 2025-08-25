@@ -15,10 +15,8 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"runtime/debug"
-	"strconv"
 	"strings"
 	"sync"
-	"time"
 )
 
 // Response buffer pool for zero-copy - HUGE buffers for pipelines
@@ -118,7 +116,7 @@ func New(cfg Config) *Server {
 	server.replManager = replManager
 
 	// Register server commands (INFO, AUTH) with dynamic stats
-	cmd.RegisterServerCommands(registry, stats, replManager, cfg.Password)
+	cmd.RegisterServerCommands(registry, stats)
 	cmd.RegisterReplicationCommands(registry, replManager)
 
 	// If configured as slave, start replication
@@ -452,8 +450,6 @@ func (s *Server) handle(conn net.Conn) {
 			defer pipelineResponsePool.Put(pb)
 			var pipelineBuf = *pb
 
-			// var pipelineBuf = make([]byte, 0, 2*1024*1024)
-
 			// Track error count for debugging
 			var errorResponses = 0
 
@@ -501,78 +497,26 @@ func (s *Server) handle(conn net.Conn) {
 				isWriteCommand := false
 
 				// Ultra-fast response generation for common commands
-				switch cmd.command {
-				case "SET", "set":
-					if len(cmd.args) >= 2 {
-						key, value := cmd.args[0], cmd.args[1]
-						expiration := time.Time{}
-						// Handle TTL options quickly
-						if len(cmd.args) >= 4 {
-							switch cmd.args[2] {
-							case "EX", "ex":
-								if seconds, parseErr := strconv.ParseInt(cmd.args[3], 10, 64); parseErr == nil {
-									expiration = time.Now().Add(time.Duration(seconds) * time.Second)
-								}
-							case "PX", "px":
-								if ms, parseErr := strconv.ParseInt(cmd.args[3], 10, 64); parseErr == nil {
-									expiration = time.Now().Add(time.Duration(ms) * time.Millisecond)
-								}
-							}
-						}
-						client.server.db.Set(key, value, expiration)
-						responseBytes = resp.OkResponse
+				respArgs := make([]resp.Value, len(cmd.args))
+				for i, arg := range cmd.args {
+					respArgs[i] = resp.Value{Type: resp.BulkString, Str: arg}
+				}
+
+				// Fallback to generic execution
+				result, execErr := s.registry.Execute(cmd.command, respArgs)
+				err = execErr
+				if err != nil {
+					responseBytes = []byte("-ERR " + err.Error() + "\r\n")
+					errorResponses++
+				} else {
+					// Convert resp.Value to bytes efficiently
+					var respBuf bytes.Buffer
+					resp.UltraEncode(&respBuf, result)
+					responseBytes = respBuf.Bytes()
+
+					// Check if write command for AOF
+					if cmdInfo, exists := s.registry.Get(cmd.command); exists && !cmdInfo.ReadOnly {
 						isWriteCommand = true
-					} else {
-						responseBytes = []byte("-ERR wrong number of arguments for 'SET' command\r\n")
-						errorResponses++
-					}
-				case "GET", "get":
-					if len(cmd.args) == 1 {
-						value, exists := client.server.db.Get(cmd.args[0])
-						if exists {
-							// Build bulk string response directly
-							responseBytes = append(responseBytes, '$')
-							responseBytes = strconv.AppendInt(responseBytes, int64(len(value)), 10)
-							responseBytes = append(responseBytes, '\r', '\n')
-							responseBytes = append(responseBytes, value...)
-							responseBytes = append(responseBytes, '\r', '\n')
-						} else {
-							responseBytes = []byte("$-1\r\n")
-						}
-					} else {
-						responseBytes = []byte("-ERR wrong number of arguments for 'GET' command\r\n")
-						errorResponses++
-					}
-				case "PING", "ping":
-					if len(cmd.args) == 0 {
-						responseBytes = []byte("+PONG\r\n")
-					} else {
-						responseBytes = append(responseBytes, '+')
-						responseBytes = append(responseBytes, cmd.args[0]...)
-						responseBytes = append(responseBytes, '\r', '\n')
-					}
-				default:
-					respArgs := make([]resp.Value, len(cmd.args))
-					for i, arg := range cmd.args {
-						respArgs[i] = resp.Value{Type: resp.BulkString, Str: arg}
-					}
-
-					// Fallback to generic execution
-					result, execErr := s.registry.Execute(cmd.command, respArgs)
-					err = execErr
-					if err != nil {
-						responseBytes = []byte("-ERR " + err.Error() + "\r\n")
-						errorResponses++
-					} else {
-						// Convert resp.Value to bytes efficiently
-						var respBuf bytes.Buffer
-						resp.UltraEncode(&respBuf, result)
-						responseBytes = respBuf.Bytes()
-
-						// Check if write command for AOF
-						if cmdInfo, exists := s.registry.Get(cmd.command); exists && !cmdInfo.ReadOnly {
-							isWriteCommand = true
-						}
 					}
 				}
 
@@ -633,37 +577,27 @@ func (s *Server) handle(conn net.Conn) {
 
 			// Ultra-fast path for most common commands
 			var fastPathErr error
-			isWriteCommand := false
+			var isWriteCommand bool
+			var respArgs = make([]resp.Value, len(args))
+			for i, arg := range args {
+				respArgs[i] = resp.Value{Type: resp.BulkString, Str: arg}
+			}
 
-			switch command {
-			case "PING", "ping":
-				fastPathErr = client.executePingCommandFast(args)
-			case "GET", "get":
-				fastPathErr = client.executeGetCommandFast(args)
-			case "SET", "set":
-				fastPathErr = client.executeSetCommandFast(args)
-				isWriteCommand = true
-			default:
-				respArgs := make([]resp.Value, len(args))
-				for i, arg := range args {
-					respArgs[i] = resp.Value{Type: resp.BulkString, Str: arg}
-				}
-				// Fallback to generic path
-				result, err := s.registry.Execute(command, respArgs)
-				if err != nil {
-					logger.Debugf("Single command error, flushing error response")
-					fastPathErr = client.writeAndFlushError("ERR " + err.Error())
+			// Fallback to generic path
+			result, err := s.registry.Execute(command, respArgs)
+			if err != nil {
+				logger.Debugf("Single command error, flushing error response")
+				fastPathErr = client.writeAndFlushError("ERR " + err.Error())
+			} else {
+				logger.Debugf("Single command success, flushing result")
+				fastPathErr = client.writeAndFlush(result)
+
+				// Check if it's a write command for AOF
+				if cmdInfo, exists := s.registry.Get(command); exists && !cmdInfo.ReadOnly {
+					isWriteCommand = true
+					logger.Debugf("Detected write command: %s (ReadOnly: %v)", command, cmdInfo.ReadOnly)
 				} else {
-					logger.Debugf("Single command success, flushing result")
-					fastPathErr = client.writeAndFlush(result)
-
-					// Check if it's a write command for AOF
-					if cmdInfo, exists := s.registry.Get(command); exists && !cmdInfo.ReadOnly {
-						isWriteCommand = true
-						logger.Debugf("Detected write command: %s (ReadOnly: %v)", command, cmdInfo.ReadOnly)
-					} else {
-						logger.Debugf("Command %s is read-only or not found (exists: %v) with args: %v", command, exists, args)
-					}
+					logger.Debugf("Command %s is read-only or not found (exists: %v) with args: %v", command, exists, args)
 				}
 			}
 

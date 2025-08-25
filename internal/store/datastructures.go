@@ -772,6 +772,10 @@ func (z *OptimizedSortedSet) ZRange(start, stop int, withScores bool) []string {
 	return res
 }
 
+func (z *OptimizedSortedSet) Rebuild() {
+	z.rebuild()
+}
+
 func (z *OptimizedSortedSet) rebuild() {
 	// assumes caller holds z.mu (write)
 	n := len(z.scores)

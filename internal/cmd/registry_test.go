@@ -278,7 +278,7 @@ func TestSetInvalidExpiration(t *testing.T) {
 	registry.Register(&Command{
 		Name:     "SET",
 		Arity:    -1,
-		Handler:  SetHandler(store),
+		Handler:  OptimizedSetHandler(store),
 		ReadOnly: false,
 	})
 
@@ -312,7 +312,7 @@ func TestDelCommand(t *testing.T) {
 	registry.Register(&Command{
 		Name:     "DEL",
 		Arity:    -1,
-		Handler:  DelHandler(store),
+		Handler:  OptimizedDelHandler(store),
 		ReadOnly: false,
 	})
 
@@ -346,7 +346,7 @@ func TestExistsCommand(t *testing.T) {
 	registry.Register(&Command{
 		Name:     "EXISTS",
 		Arity:    -1,
-		Handler:  ExistsHandler(store),
+		Handler:  OptimizedExistsHandler(store),
 		ReadOnly: true,
 	})
 
@@ -376,7 +376,7 @@ func TestTTLCommand(t *testing.T) {
 	registry.Register(&Command{
 		Name:     "TTL",
 		Arity:    1,
-		Handler:  TTLHandler(store),
+		Handler:  OptimizedTTLHandler(store),
 		ReadOnly: true,
 	})
 
@@ -406,7 +406,7 @@ func TestPTTLCommand(t *testing.T) {
 	registry.Register(&Command{
 		Name:     "PTTL",
 		Arity:    1,
-		Handler:  PTTLHandler(store),
+		Handler:  OptimizedPTTLHandler(store),
 		ReadOnly: true,
 	})
 
@@ -425,7 +425,7 @@ func TestExpireCommand(t *testing.T) {
 	registry.Register(&Command{
 		Name:     "EXPIRE",
 		Arity:    2,
-		Handler:  ExpireHandler(store),
+		Handler:  OptimizedExpireHandler(store),
 		ReadOnly: false,
 	})
 
