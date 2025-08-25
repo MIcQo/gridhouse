@@ -37,7 +37,7 @@ build-current:
 	CGO_ENABLED=0 go build -ldflags="${LDFLAGS}" -o ${APP_EXECUTABLE} main.go
 
 lint: ## lint code
-	golangci-lint run --no-config --disable=errcheck
+	golangci-lint run
 
 vet: ## runs go vet
 	go vet ./...
