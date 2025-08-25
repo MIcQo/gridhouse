@@ -1,4 +1,5 @@
 # GridHouse
+[![codecov](https://codecov.io/github/MIcQo/gridhouse/graph/badge.svg?token=YBF6MA7FEH)](https://codecov.io/github/MIcQo/gridhouse)
 
 A high-performance Redis-compatible in-memory database written in Go.
 
