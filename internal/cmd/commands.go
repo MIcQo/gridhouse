@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+type AclGroup string // TODO
+
 // Store interface for commands that need to access data
 type Store interface {
 	Set(key, value string, expiration time.Time)
@@ -29,10 +31,11 @@ type Handler func(args []resp.Value) (resp.Value, error)
 
 // Command represents a registered command
 type Command struct {
-	Name     string
-	Arity    int // -1 means variable arity, >=0 means exact arity
-	Handler  Handler
-	ReadOnly bool
+	Name      string
+	Arity     int // -1 means variable arity, >=0 means exact arity
+	Handler   Handler
+	ReadOnly  bool
+	ACLGroups []AclGroup
 }
 
 // Registry holds all registered commands
@@ -259,6 +262,27 @@ func RegisterOptimizedCommands(registry *Registry, store DataStore) {
 		Arity:    -1,
 		Handler:  OptimizedKeysHandler(store),
 		ReadOnly: true,
+	})
+
+	registry.Register(&Command{
+		Name:     "RENAME",
+		Arity:    2,
+		Handler:  RenameHandler(store),
+		ReadOnly: false,
+	})
+
+	registry.Register(&Command{
+		Name:     "RENAMENX",
+		Arity:    2,
+		Handler:  RenameNxHandler(store),
+		ReadOnly: false,
+	})
+
+	registry.Register(&Command{
+		Name:     "COPY",
+		Arity:    -1, // Variable arity: 2 or 3 arguments
+		Handler:  CopyHandler(store),
+		ReadOnly: false,
 	})
 
 	registry.Register(&Command{
