@@ -216,6 +216,20 @@ func RegisterOptimizedCommands(registry *Registry, store DataStore) {
 	})
 
 	registry.Register(&Command{
+		Name:     "INCRBY",
+		Arity:    2,
+		Handler:  IncrByHandler(store),
+		ReadOnly: false,
+	})
+
+	registry.Register(&Command{
+		Name:     "DECRBY",
+		Arity:    2,
+		Handler:  DecrByHandler(store),
+		ReadOnly: false,
+	})
+
+	registry.Register(&Command{
 		Name:     "DEL",
 		Arity:    -1,
 		Handler:  OptimizedDelHandler(store),

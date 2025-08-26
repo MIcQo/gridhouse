@@ -549,3 +549,619 @@ func TestOptimizedDecrHandler(t *testing.T) {
 		assert.Equal(t, "0", value)
 	})
 }
+
+func TestIncrByHandler(t *testing.T) {
+	t.Run("INCRBY with no arguments", func(t *testing.T) {
+		store := newIncrMockStore()
+		handler := IncrByHandler(store)
+		args := []resp.Value{}
+
+		result, err := handler(args)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "wrong number of arguments for 'INCRBY' command")
+		assert.Equal(t, resp.Value{}, result)
+	})
+
+	t.Run("INCRBY with one argument", func(t *testing.T) {
+		store := newIncrMockStore()
+		handler := IncrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "key"},
+		}
+
+		result, err := handler(args)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "wrong number of arguments for 'INCRBY' command")
+		assert.Equal(t, resp.Value{}, result)
+	})
+
+	t.Run("INCRBY with too many arguments", func(t *testing.T) {
+		store := newIncrMockStore()
+		handler := IncrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "key"},
+			{Type: resp.BulkString, Str: "5"},
+			{Type: resp.BulkString, Str: "extra"},
+		}
+
+		result, err := handler(args)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "wrong number of arguments for 'INCRBY' command")
+		assert.Equal(t, resp.Value{}, result)
+	})
+
+	t.Run("INCRBY with new key", func(t *testing.T) {
+		store := newIncrMockStore()
+		handler := IncrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "newkey"},
+			{Type: resp.BulkString, Str: "5"},
+		}
+
+		result, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Integer, result.Type)
+		assert.Equal(t, int64(5), result.Int)
+
+		// Verify the value was stored
+		value, exists := store.Get("newkey")
+		assert.True(t, exists)
+		assert.Equal(t, "5", value)
+	})
+
+	t.Run("INCRBY with existing integer key", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("existingkey", "10", time.Time{})
+		handler := IncrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "existingkey"},
+			{Type: resp.BulkString, Str: "5"},
+		}
+
+		result, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Integer, result.Type)
+		assert.Equal(t, int64(15), result.Int)
+
+		// Verify the value was updated
+		value, exists := store.Get("existingkey")
+		assert.True(t, exists)
+		assert.Equal(t, "15", value)
+	})
+
+	t.Run("INCRBY with zero increment", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("zerokey", "10", time.Time{})
+		handler := IncrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "zerokey"},
+			{Type: resp.BulkString, Str: "0"},
+		}
+
+		result, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Integer, result.Type)
+		assert.Equal(t, int64(10), result.Int)
+
+		// Verify the value was unchanged
+		value, exists := store.Get("zerokey")
+		assert.True(t, exists)
+		assert.Equal(t, "10", value)
+	})
+
+	t.Run("INCRBY with negative increment", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("negkey", "10", time.Time{})
+		handler := IncrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "negkey"},
+			{Type: resp.BulkString, Str: "-3"},
+		}
+
+		result, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Integer, result.Type)
+		assert.Equal(t, int64(7), result.Int)
+
+		// Verify the value was updated
+		value, exists := store.Get("negkey")
+		assert.True(t, exists)
+		assert.Equal(t, "7", value)
+	})
+
+	t.Run("INCRBY with large increment", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("largekey", "1000000", time.Time{})
+		handler := IncrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "largekey"},
+			{Type: resp.BulkString, Str: "500000"},
+		}
+
+		result, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Integer, result.Type)
+		assert.Equal(t, int64(1500000), result.Int)
+
+		// Verify the value was updated
+		value, exists := store.Get("largekey")
+		assert.True(t, exists)
+		assert.Equal(t, "1500000", value)
+	})
+
+	t.Run("INCRBY with non-integer increment", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("key", "10", time.Time{})
+		handler := IncrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "key"},
+			{Type: resp.BulkString, Str: "notanumber"},
+		}
+
+		result, err := handler(args)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "value is not an integer or out of range")
+		assert.Equal(t, resp.Value{}, result)
+
+		// Verify the original value was not changed
+		value, exists := store.Get("key")
+		assert.True(t, exists)
+		assert.Equal(t, "10", value)
+	})
+
+	t.Run("INCRBY with non-integer existing value", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("stringkey", "notanumber", time.Time{})
+		handler := IncrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "stringkey"},
+			{Type: resp.BulkString, Str: "5"},
+		}
+
+		result, err := handler(args)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "value is not an integer or out of range")
+		assert.Equal(t, resp.Value{}, result)
+
+		// Verify the original value was not changed
+		value, exists := store.Get("stringkey")
+		assert.True(t, exists)
+		assert.Equal(t, "notanumber", value)
+	})
+
+	t.Run("INCRBY with decimal increment", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("key", "10", time.Time{})
+		handler := IncrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "key"},
+			{Type: resp.BulkString, Str: "3.14"},
+		}
+
+		result, err := handler(args)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "value is not an integer or out of range")
+		assert.Equal(t, resp.Value{}, result)
+
+		// Verify the original value was not changed
+		value, exists := store.Get("key")
+		assert.True(t, exists)
+		assert.Equal(t, "10", value)
+	})
+
+	t.Run("INCRBY with empty string increment", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("key", "10", time.Time{})
+		handler := IncrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "key"},
+			{Type: resp.BulkString, Str: ""},
+		}
+
+		result, err := handler(args)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "value is not an integer or out of range")
+		assert.Equal(t, resp.Value{}, result)
+
+		// Verify the original value was not changed
+		value, exists := store.Get("key")
+		assert.True(t, exists)
+		assert.Equal(t, "10", value)
+	})
+
+	t.Run("INCRBY with special characters in key", func(t *testing.T) {
+		store := newIncrMockStore()
+		handler := IncrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "special-key_123"},
+			{Type: resp.BulkString, Str: "5"},
+		}
+
+		result, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Integer, result.Type)
+		assert.Equal(t, int64(5), result.Int)
+
+		// Verify the value was stored
+		value, exists := store.Get("special-key_123")
+		assert.True(t, exists)
+		assert.Equal(t, "5", value)
+	})
+
+	t.Run("INCRBY multiple times on same key", func(t *testing.T) {
+		store := newIncrMockStore()
+		handler := IncrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "multikey"},
+			{Type: resp.BulkString, Str: "5"},
+		}
+
+		// First increment
+		result1, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(5), result1.Int)
+
+		// Second increment
+		result2, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(10), result2.Int)
+
+		// Third increment
+		result3, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(15), result3.Int)
+
+		// Verify final value
+		value, exists := store.Get("multikey")
+		assert.True(t, exists)
+		assert.Equal(t, "15", value)
+	})
+
+	t.Run("INCRBY with overflow", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("overflowkey", "9223372036854775800", time.Time{}) // Close to max int64
+		handler := IncrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "overflowkey"},
+			{Type: resp.BulkString, Str: "10"},
+		}
+
+		result, err := handler(args)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "increment or decrement would overflow")
+		assert.Equal(t, resp.Value{}, result)
+
+		// Verify the original value was not changed
+		value, exists := store.Get("overflowkey")
+		assert.True(t, exists)
+		assert.Equal(t, "9223372036854775800", value)
+	})
+}
+
+func TestDecrByHandler(t *testing.T) {
+	t.Run("DECRBY with no arguments", func(t *testing.T) {
+		store := newIncrMockStore()
+		handler := DecrByHandler(store)
+		args := []resp.Value{}
+
+		result, err := handler(args)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "wrong number of arguments for 'DECRBY' command")
+		assert.Equal(t, resp.Value{}, result)
+	})
+
+	t.Run("DECRBY with one argument", func(t *testing.T) {
+		store := newIncrMockStore()
+		handler := DecrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "key"},
+		}
+
+		result, err := handler(args)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "wrong number of arguments for 'DECRBY' command")
+		assert.Equal(t, resp.Value{}, result)
+	})
+
+	t.Run("DECRBY with too many arguments", func(t *testing.T) {
+		store := newIncrMockStore()
+		handler := DecrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "key"},
+			{Type: resp.BulkString, Str: "5"},
+			{Type: resp.BulkString, Str: "extra"},
+		}
+
+		result, err := handler(args)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "wrong number of arguments for 'DECRBY' command")
+		assert.Equal(t, resp.Value{}, result)
+	})
+
+	t.Run("DECRBY with new key", func(t *testing.T) {
+		store := newIncrMockStore()
+		handler := DecrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "newkey"},
+			{Type: resp.BulkString, Str: "5"},
+		}
+
+		result, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Integer, result.Type)
+		assert.Equal(t, int64(-5), result.Int)
+
+		// Verify the value was stored
+		value, exists := store.Get("newkey")
+		assert.True(t, exists)
+		assert.Equal(t, "-5", value)
+	})
+
+	t.Run("DECRBY with existing integer key", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("existingkey", "10", time.Time{})
+		handler := DecrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "existingkey"},
+			{Type: resp.BulkString, Str: "5"},
+		}
+
+		result, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Integer, result.Type)
+		assert.Equal(t, int64(5), result.Int)
+
+		// Verify the value was updated
+		value, exists := store.Get("existingkey")
+		assert.True(t, exists)
+		assert.Equal(t, "5", value)
+	})
+
+	t.Run("DECRBY with zero decrement", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("zerokey", "10", time.Time{})
+		handler := DecrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "zerokey"},
+			{Type: resp.BulkString, Str: "0"},
+		}
+
+		result, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Integer, result.Type)
+		assert.Equal(t, int64(10), result.Int)
+
+		// Verify the value was unchanged
+		value, exists := store.Get("zerokey")
+		assert.True(t, exists)
+		assert.Equal(t, "10", value)
+	})
+
+	t.Run("DECRBY with negative decrement (increment)", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("negkey", "10", time.Time{})
+		handler := DecrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "negkey"},
+			{Type: resp.BulkString, Str: "-3"},
+		}
+
+		result, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Integer, result.Type)
+		assert.Equal(t, int64(13), result.Int)
+
+		// Verify the value was updated
+		value, exists := store.Get("negkey")
+		assert.True(t, exists)
+		assert.Equal(t, "13", value)
+	})
+
+	t.Run("DECRBY with large decrement", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("largekey", "1000000", time.Time{})
+		handler := DecrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "largekey"},
+			{Type: resp.BulkString, Str: "500000"},
+		}
+
+		result, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Integer, result.Type)
+		assert.Equal(t, int64(500000), result.Int)
+
+		// Verify the value was updated
+		value, exists := store.Get("largekey")
+		assert.True(t, exists)
+		assert.Equal(t, "500000", value)
+	})
+
+	t.Run("DECRBY with non-integer decrement", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("key", "10", time.Time{})
+		handler := DecrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "key"},
+			{Type: resp.BulkString, Str: "notanumber"},
+		}
+
+		result, err := handler(args)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "value is not an integer or out of range")
+		assert.Equal(t, resp.Value{}, result)
+
+		// Verify the original value was not changed
+		value, exists := store.Get("key")
+		assert.True(t, exists)
+		assert.Equal(t, "10", value)
+	})
+
+	t.Run("DECRBY with non-integer existing value", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("stringkey", "notanumber", time.Time{})
+		handler := DecrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "stringkey"},
+			{Type: resp.BulkString, Str: "5"},
+		}
+
+		result, err := handler(args)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "value is not an integer or out of range")
+		assert.Equal(t, resp.Value{}, result)
+
+		// Verify the original value was not changed
+		value, exists := store.Get("stringkey")
+		assert.True(t, exists)
+		assert.Equal(t, "notanumber", value)
+	})
+
+	t.Run("DECRBY with decimal decrement", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("key", "10", time.Time{})
+		handler := DecrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "key"},
+			{Type: resp.BulkString, Str: "3.14"},
+		}
+
+		result, err := handler(args)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "value is not an integer or out of range")
+		assert.Equal(t, resp.Value{}, result)
+
+		// Verify the original value was not changed
+		value, exists := store.Get("key")
+		assert.True(t, exists)
+		assert.Equal(t, "10", value)
+	})
+
+	t.Run("DECRBY with empty string decrement", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("key", "10", time.Time{})
+		handler := DecrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "key"},
+			{Type: resp.BulkString, Str: ""},
+		}
+
+		result, err := handler(args)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "value is not an integer or out of range")
+		assert.Equal(t, resp.Value{}, result)
+
+		// Verify the original value was not changed
+		value, exists := store.Get("key")
+		assert.True(t, exists)
+		assert.Equal(t, "10", value)
+	})
+
+	t.Run("DECRBY with special characters in key", func(t *testing.T) {
+		store := newIncrMockStore()
+		handler := DecrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "special-key_123"},
+			{Type: resp.BulkString, Str: "5"},
+		}
+
+		result, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Integer, result.Type)
+		assert.Equal(t, int64(-5), result.Int)
+
+		// Verify the value was stored
+		value, exists := store.Get("special-key_123")
+		assert.True(t, exists)
+		assert.Equal(t, "-5", value)
+	})
+
+	t.Run("DECRBY multiple times on same key", func(t *testing.T) {
+		store := newIncrMockStore()
+		handler := DecrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "multikey"},
+			{Type: resp.BulkString, Str: "5"},
+		}
+
+		// First decrement
+		result1, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(-5), result1.Int)
+
+		// Second decrement
+		result2, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(-10), result2.Int)
+
+		// Third decrement
+		result3, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(-15), result3.Int)
+
+		// Verify final value
+		value, exists := store.Get("multikey")
+		assert.True(t, exists)
+		assert.Equal(t, "-15", value)
+	})
+
+	t.Run("DECRBY with underflow", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("underflowkey", "-9223372036854775800", time.Time{}) // Close to min int64
+		handler := DecrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "underflowkey"},
+			{Type: resp.BulkString, Str: "10"},
+		}
+
+		result, err := handler(args)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ERR increment or decrement would overflow")
+		assert.Equal(t, resp.Value{}, result)
+
+		// Verify the original value was not changed
+		value, exists := store.Get("underflowkey")
+		assert.True(t, exists)
+		assert.Equal(t, "-9223372036854775800", value)
+	})
+
+	t.Run("DECRBY with positive value to zero", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("poskey", "5", time.Time{})
+		handler := DecrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "poskey"},
+			{Type: resp.BulkString, Str: "5"},
+		}
+
+		result, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Integer, result.Type)
+		assert.Equal(t, int64(0), result.Int)
+
+		// Verify the value was updated
+		value, exists := store.Get("poskey")
+		assert.True(t, exists)
+		assert.Equal(t, "0", value)
+	})
+
+	t.Run("DECRBY with positive value to negative", func(t *testing.T) {
+		store := newIncrMockStore()
+		store.Set("poskey", "5", time.Time{})
+		handler := DecrByHandler(store)
+		args := []resp.Value{
+			{Type: resp.BulkString, Str: "poskey"},
+			{Type: resp.BulkString, Str: "10"},
+		}
+
+		result, err := handler(args)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Integer, result.Type)
+		assert.Equal(t, int64(-5), result.Int)
+
+		// Verify the value was updated
+		value, exists := store.Get("poskey")
+		assert.True(t, exists)
+		assert.Equal(t, "-5", value)
+	})
+}
