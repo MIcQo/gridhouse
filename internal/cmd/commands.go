@@ -279,6 +279,20 @@ func RegisterOptimizedCommands(registry *Registry, store DataStore) {
 	})
 
 	registry.Register(&Command{
+		Name:     "STRLEN",
+		Arity:    1,
+		Handler:  StrlenHandler(store),
+		ReadOnly: true,
+	})
+
+	registry.Register(&Command{
+		Name:     "APPEND",
+		Arity:    2,
+		Handler:  AppendHandler(store),
+		ReadOnly: false,
+	})
+
+	registry.Register(&Command{
 		Name:     "KEYS",
 		Arity:    -1,
 		Handler:  OptimizedKeysHandler(store),
