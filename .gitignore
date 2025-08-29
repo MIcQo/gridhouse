@@ -4,6 +4,7 @@
 .code
 
 bin/
+dist/
 data/
 data-replica/
 test-server-data/

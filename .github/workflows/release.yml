@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  GO111MODULE: on
+  CGO_ENABLED: 0
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Get commit hash
+        id: commit
+        run: echo "commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Get build date
+        id: build_date
+        run: echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+      - name: Build for multiple platforms
+        run: |
+          mkdir -p dist/
+          
+          # Build flags
+          LDFLAGS="-X 'gridhouse/internal/stats.Version=${{ steps.version.outputs.version }}' -X 'gridhouse/internal/stats.Commit=${{ steps.commit.outputs.commit }}' -X 'gridhouse/internal/stats.BuildDate=${{ steps.build_date.outputs.build_date }}'"
+          
+          # Darwin AMD64
+          GOOS=darwin GOARCH=amd64 go build -ldflags="$LDFLAGS" -o dist/gridhouse-darwin-amd64 main.go
+          
+          # Darwin ARM64
+          GOOS=darwin GOARCH=arm64 go build -ldflags="$LDFLAGS" -o dist/gridhouse-darwin-arm64 main.go
+          
+          # Linux AMD64
+          GOOS=linux GOARCH=amd64 go build -ldflags="$LDFLAGS" -o dist/gridhouse-linux-amd64 main.go
+          
+          # Windows AMD64
+          GOOS=windows GOARCH=amd64 go build -ldflags="$LDFLAGS" -o dist/gridhouse-windows-amd64.exe main.go
+
+      - name: Create checksums
+        run: |
+          cd dist/
+          sha256sum gridhouse-* > checksums.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/gridhouse-darwin-amd64
+            dist/gridhouse-darwin-arm64
+            dist/gridhouse-linux-amd64
+            dist/gridhouse-windows-amd64.exe
+            dist/checksums.txt
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          title: Release ${{ steps.version.outputs.version }}
