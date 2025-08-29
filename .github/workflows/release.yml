@@ -58,7 +58,7 @@ jobs:
           GOOS=linux GOARCH=amd64 go build -ldflags="$LDFLAGS" -o dist/gridhouse-linux-amd64 main.go
           
           # Windows AMD64
-          GOOS=windows GOARCH=amd64 go build -ldflags="$LDFLAGS" -o dist/gridhouse-windows-amd64.exe main.go
+#          GOOS=windows GOARCH=amd64 go build -ldflags="$LDFLAGS" -o dist/gridhouse-windows-amd64.exe main.go
 
       - name: Create checksums
         run: |
@@ -72,7 +72,7 @@ jobs:
             dist/gridhouse-darwin-amd64
             dist/gridhouse-darwin-arm64
             dist/gridhouse-linux-amd64
-            dist/gridhouse-windows-amd64.exe
+#            dist/gridhouse-windows-amd64.exe
             dist/checksums.txt
           draft: false
           prerelease: false
